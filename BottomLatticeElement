@@ -1,0 +1,33 @@
+
+public class BottomLatticeElement implements LatticeElement{
+
+  @Override
+	public LatticeElement Join(LatticeElement element) {
+		return element;
+	}
+
+	@Override
+	public LatticeElement Meet(LatticeElement element) {
+		return new BottomLatticeElement();
+	}
+	@Override
+	public String toString()
+	{
+		return "B";
+		
+	}
+
+	@Override
+	public boolean equals(LatticeElement element) {
+		if(element instanceof BottomLatticeElement)
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+		
+	}
+
+}
