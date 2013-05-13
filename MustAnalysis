@@ -1,0 +1,670 @@
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+
+import soot.Body;
+import soot.Local;
+import soot.Scene;
+import soot.SootClass;
+import soot.SootMethod;
+import soot.Unit;
+import soot.Value;
+import soot.ValueBox;
+import soot.jimple.AddExpr;
+import soot.jimple.AssignStmt;
+import soot.jimple.BinopExpr;
+import soot.jimple.DefinitionStmt;
+import soot.jimple.DivExpr;
+import soot.jimple.FieldRef;
+import soot.jimple.InstanceFieldRef;
+import soot.jimple.IntConstant;
+import soot.jimple.MulExpr;
+import soot.jimple.NumericConstant;
+import soot.jimple.SubExpr;
+import soot.jimple.internal.JAssignStmt;
+import soot.tagkit.LineNumberTag;
+import soot.toolkits.graph.ExceptionalUnitGraph;
+import soot.toolkits.graph.UnitGraph;
+
+public class MustAnalysis {
+  public static Map<Unit, Map<Value,LatticeElement>> entries = new HashMap<Unit,Map<Value,LatticeElement>>();
+	public static Map<Unit, Map<Value,LatticeElement>> exits = new HashMap<Unit, Map<Value,LatticeElement>>();
+	public static UnitGraph g;
+	public static List<Unit> worklist = new LinkedList<Unit>();
+	
+	// declare bottom field 
+	// declare top field 
+	
+	public static void MustAnalysis(UnitGraph g)
+	{
+		initializeEntryAndExitNodes(g);
+		worklist.addAll(g.getHeads());
+		while(worklist.size()>0)
+		{
+			Unit currentNode = worklist.remove(0);
+			List<Unit> pres = g.getPredsOf(currentNode);
+			// Initialize the entry(u) value
+			if(pres.size() > 0)
+			{
+				for(Unit u: pres)
+				{
+					entries.put(currentNode, ValueTransfer(exits.get(u),entries.get(currentNode)));
+					exits.put(currentNode, ValueTransfer(exits.get(u),entries.get(currentNode)));
+				}
+			}
+			
+			if(currentNode instanceof AssignStmt)
+			{
+				AssignStmt stmt = (AssignStmt) currentNode;
+				Value variable = stmt.getLeftOp();
+				LatticeElement entry_element = entries.get(currentNode).get(variable);
+			}
+			// Do the transfer function. To get exit(currentNode) from the entry(currentNode)
+			Map<Value,LatticeElement> before_Transfer = new HashMap<Value,LatticeElement>();
+			Set<Value> values = exits.get(currentNode).keySet();
+			for(Value v: values)
+			{
+				before_Transfer.put(v, exits.get(currentNode).get(v));
+			}
+			exits.put(currentNode, generate(currentNode));
+			if(currentNode instanceof AssignStmt)
+			{
+				AssignStmt stmt1 = (AssignStmt) currentNode;
+				Value variable1 = stmt1.getLeftOp();
+				
+				LatticeElement exit_element = exits.get(currentNode).get(variable1);
+				System.out.println("Statement: "+currentNode.toString());
+				System.out.println("The Must Set for"+ " "+ variable1+ " is: "+ exit_element.toString());
+			}
+			Map<Value,LatticeElement> after_Transfer = exits.get(currentNode);
+			if(currentNode instanceof AssignStmt)
+			{
+				if(fixedPointLocating(before_Transfer,after_Transfer) == false)
+				{
+					List<Unit> succs = g.getSuccsOf(currentNode);
+					for(Unit u: succs)
+					{
+						if(!worklist.contains(u))
+						{
+							worklist.add(u);
+						}
+					}
+				}
+			}
+			else 
+			{
+				List<Unit> succs = g.getSuccsOf(currentNode);
+				for(Unit u: succs)
+				{
+					if(!worklist.contains(u))
+					{
+						worklist.add(u);
+					}
+				}
+			}
+			
+			
+		}
+		
+	}
+	public static Map<Value,LatticeElement> ValueTransfer(Map<Value,LatticeElement> exit, Map<Value,LatticeElement> entry)
+	{
+			Map<Value,LatticeElement> newEntry = new HashMap<Value,LatticeElement>();
+			Set<Value> valueSet = entry.keySet();
+			Iterator<Value> valueIt = valueSet.iterator();
+			while(valueIt.hasNext())
+			{
+				Value currentValue = valueIt.next();
+				newEntry.put(currentValue, exit.get(currentValue));
+				LatticeElement entryElement = newEntry.get(currentValue).Meet(entry.get(currentValue));
+				newEntry.put(currentValue, entryElement);
+			}
+		return newEntry;
+	}
+	public static boolean fixedPointLocating(Map<Value,LatticeElement> before_Transfer,Map<Value,LatticeElement> after_Transfer)
+	{
+		boolean isEqual = true;
+		Set<Value> localVariables = before_Transfer.keySet();
+		for(Value value: localVariables)
+		{
+			if(!before_Transfer.get(value).equals(after_Transfer.get(value)))
+			{
+				isEqual = false;
+			}
+		}
+		return isEqual;
+	}
+	
+	public static Map<Value, LatticeElement> generate(Unit unit)
+	{
+		if(unit instanceof AssignStmt)
+		{
+			AssignStmt stmt = (AssignStmt) unit;
+			Value rightOperator = stmt.getRightOp();
+		
+			if (rightOperator instanceof IntConstant) 
+			{
+				IntConstant rightValue = (IntConstant)rightOperator;
+				Set<Integer> integers = new HashSet<Integer>();
+				integers.add(rightValue.value);
+				RegularLatticeElement element = new RegularLatticeElement(integers);
+				exits.get(unit).put(stmt.getLeftOp(), element);
+			}
+			else if (rightOperator instanceof BinopExpr)
+			{
+				BinopExpr rightOperation = (BinopExpr) rightOperator;
+				Set<Integer> results = new HashSet<Integer>();
+				if(rightOperation instanceof AddExpr)
+				{
+					Value operand1 = rightOperation.getOp1();
+					Value operand2 = rightOperation.getOp2();
+					if (operand1 instanceof IntConstant && !(operand2 instanceof IntConstant))
+					{
+						IntConstant field1= (IntConstant) operand1;
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next+field1.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+							
+						}
+						else if (operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+					}
+					else if (!(operand1 instanceof IntConstant) && operand2 instanceof IntConstant)
+					{
+						IntConstant field2= (IntConstant) operand2;
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						if(operand1Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand1Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next+field2.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+					}
+					else if (!(operand1 instanceof IntConstant) && !(operand1 instanceof IntConstant))
+					{
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand1Element instanceof RegularLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element1 = (RegularLatticeElement) operand1Element;
+							RegularLatticeElement element2 = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers_1 = element1.getElementValue();
+							Set<Integer> integers_2 = element2.getElementValue();
+							for(Integer i : integers_1)
+							{
+								for(Integer j: integers_2)
+								{
+									Integer result = i + j;
+									results.add(result);
+								}
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+						
+					}
+				}
+				else if (rightOperation instanceof SubExpr)
+				{
+					Value operand1 = rightOperation.getOp1();
+					Value operand2 = rightOperation.getOp2();
+					if (operand1 instanceof IntConstant && !(operand2 instanceof IntConstant))
+					{
+						IntConstant field1= (IntConstant) operand1;
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(field1.value-next);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+							
+						}
+						else if (operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+					}
+					else if (!(operand1 instanceof IntConstant) && operand2 instanceof IntConstant)
+					{
+						IntConstant field2= (IntConstant) operand2;
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						if(operand1Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand1Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next-field2.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+					}
+					else if (!(operand1 instanceof IntConstant) && !(operand1 instanceof IntConstant))
+					{
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand1Element instanceof RegularLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element1 = (RegularLatticeElement) operand1Element;
+							RegularLatticeElement element2 = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers_1 = element1.getElementValue();
+							Set<Integer> integers_2 = element2.getElementValue();
+							for(Integer i : integers_1)
+							{
+								for(Integer j: integers_2)
+								{
+									Integer result = i - j;
+									results.add(result);
+								}
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+						
+					}
+				}
+				if(rightOperation instanceof MulExpr)
+				{
+					Value operand1 = rightOperation.getOp1();
+					Value operand2 = rightOperation.getOp2();
+					if (operand1 instanceof IntConstant && !(operand2 instanceof IntConstant))
+					{
+						IntConstant field1= (IntConstant) operand1;
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next*field1.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+					}
+					else if (!(operand1 instanceof IntConstant) && operand2 instanceof IntConstant)
+					{
+						IntConstant field2= (IntConstant) operand2;
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						if(operand1Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand1Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next*field2.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+					}
+					else if (!(operand1 instanceof IntConstant) && !(operand1 instanceof IntConstant))
+					{
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand1Element instanceof RegularLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element1 = (RegularLatticeElement) operand1Element;
+							RegularLatticeElement element2 = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers_1 = element1.getElementValue();
+							Set<Integer> integers_2 = element2.getElementValue();
+							for(Integer i : integers_1)
+							{
+								for(Integer j: integers_2)
+								{
+									Integer result = i * j;
+									results.add(result);
+								}
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+						
+					}
+				}
+				else if (rightOperation instanceof DivExpr)
+				{
+					Value operand1 = rightOperation.getOp1();
+					Value operand2 = rightOperation.getOp2();
+					if (operand1 instanceof IntConstant && !(operand2 instanceof IntConstant))
+					{
+						IntConstant field1= (IntConstant) operand1;
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(field1.value/next);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+							
+						}
+						else if (operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+					}
+					else if (!(operand1 instanceof IntConstant) && operand2 instanceof IntConstant)
+					{
+						IntConstant field2= (IntConstant) operand2;
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						if(operand1Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element = (RegularLatticeElement) operand1Element;
+							Set<Integer> integers = element.getElementValue();
+							Iterator<Integer> it = integers.iterator();
+							while(it.hasNext())
+							{
+								Integer next = it.next();
+								results.add(next/field2.value);
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+					}
+					else if (!(operand1 instanceof IntConstant) && !(operand1 instanceof IntConstant))
+					{
+						LatticeElement operand1Element = entries.get(unit).get(operand1);
+						LatticeElement operand2Element = entries.get(unit).get(operand2);
+						if(operand1Element instanceof RegularLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							RegularLatticeElement element1 = (RegularLatticeElement) operand1Element;
+							RegularLatticeElement element2 = (RegularLatticeElement) operand2Element;
+							Set<Integer> integers_1 = element1.getElementValue();
+							Set<Integer> integers_2 = element2.getElementValue();
+							for(Integer i : integers_1)
+							{
+								for(Integer j: integers_2)
+								{
+									Integer result = i/j;
+									results.add(result);
+								}
+							}
+							RegularLatticeElement element_1 = new RegularLatticeElement(results);
+							exits.get(unit).put(stmt.getLeftOp(), element_1);
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof TopLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof RegularLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof TopLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new TopLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof RegularLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						else if (operand1Element instanceof BottomLatticeElement && operand2Element instanceof BottomLatticeElement)
+						{
+							exits.get(unit).put(((AssignStmt)unit).getLeftOp(), new BottomLatticeElement());
+						}
+						
+						
+					}
+				}
+
+			}
+			else if (rightOperator instanceof Value)
+			{
+				Value rightVariable = (Value)rightOperator;
+				LatticeElement element = entries.get(unit).get(rightVariable);
+				exits.get(unit).put(stmt.getLeftOp(), element);
+			}
+				
+		}
+		return exits.get(unit);
+		}
+		
+		
+// To do this, we need have a list of worklist which could keep track of the node need to be 
+// analyzed, the current node's successors would be put into a set, if the successors
+// set do not belong to the worklist, then they can be added into the worklist. 
+	public static UnitGraph getControlFlow(Body body, String methodName)
+	{
+		SootMethod method = body.getMethod();
+		if (method.getName().equals(methodName)!= false) 
+		{
+			g = new ExceptionalUnitGraph(body);
+		}
+		return g;
+	} 
+	
+	// Assigning a set of all variables in the unitgraph initially with each of the variable
+	// associate with a TopLatticeElement 
+	static void initializeEntryAndExitNodes(UnitGraph unitgraph)
+	{
+		Iterator<Unit> it = unitgraph.iterator();
+		Set<Value> variables = getAllVariables(unitgraph);
+		while(it.hasNext())
+		{
+			Unit next = it.next();
+			Map<Value,LatticeElement> initialValues= new HashMap<Value,LatticeElement>(); 
+			Iterator<Value> variableIterator = variables.iterator();
+			while(variableIterator.hasNext())
+			{
+				Value nextValue = variableIterator.next();
+				initialValues.put(nextValue, new TopLatticeElement());
+			}
+			entries.put(next, initialValues);
+			exits.put(next,initialValues);
+			
+		}
+	}
+	static Set<Value> getAllVariables(UnitGraph unitgraph)
+	{
+		Set<Value> variables = new HashSet<Value>();
+		Iterator<Unit> it = unitgraph.iterator();
+		while(it.hasNext())
+		{
+			Unit next = it.next();
+			if(next instanceof JAssignStmt)
+			{
+				JAssignStmt statement = (JAssignStmt) next;
+				variables.add(statement.getLeftOp());
+			}
+		}
+		return variables;
+	}
+	
+}
