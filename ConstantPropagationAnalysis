@@ -1,0 +1,65 @@
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Set;
+
+import soot.Body;
+import soot.Scene;
+import soot.SootClass;
+import soot.SootMethod;
+import soot.Unit;
+import soot.Value;
+import soot.jimple.AssignStmt;
+import soot.jimple.Stmt;
+import soot.jimple.toolkits.annotation.logic.Loop;
+import soot.options.Options;
+import soot.toolkits.graph.LoopNestTree;
+import soot.toolkits.graph.UnitGraph;
+
+
+public class ConstantPropagationAnalysis {
+  public static UnitGraph g;
+	public static Set<Value> blacklist = new HashSet<Value>();
+	public static List<Stmt> loopStatement = new LinkedList<Stmt>();
+	public static void main(String[] args) 
+	{
+		// TODO Auto-generated method stub
+		// check if the number of arguments is valid 
+    	if (args.length !=1)
+			throw new IllegalArgumentException("Usage: java -cp"+ ConstantPropagationAnalysis.class.getName() + 
+					" <class file>"); 
+    	// load class argument into a soot class 
+    	SootClass sClass = Scene.v().loadClassAndSupport(args[0]);
+    	sClass.setApplicationClass();
+    	MustAnalysis mustAnalysis = new MustAnalysis();
+    	MayAnalysis mayAnalysis = new MayAnalysis();
+    	Options.v().set_soot_classpath(" dk.brics.soot.annotations.TagBusyExpressions");
+    	System.out.println("The ClassPath for Soot is" + Options.v().soot_classpath());
+    	// get the methods from the class
+    	Iterator<SootMethod> methodsIterator = sClass.methodIterator(); 
+    	System.out.println("==============================================");
+    	System.out.println("The Must Analysis Result for this Program is: ");
+    	System.out.println("==============================================");
+    	while (methodsIterator.hasNext())
+    	{
+    		Body activeBody = methodsIterator.next().retrieveActiveBody(); 
+    		g = mustAnalysis.getControlFlow(activeBody,activeBody.getMethod().getName());
+    		mustAnalysis.MustAnalysis(g);
+    	}
+
+			
+    	System.out.println("==============================================");
+    	System.out.println("The May Analysis Result for this Program is: ");
+    	System.out.println("==============================================");
+    	Iterator<SootMethod> methodsIterator1 = sClass.methodIterator(); 
+    	while (methodsIterator1.hasNext())
+    	{
+    		Body activeBody = methodsIterator1.next().retrieveActiveBody(); 
+    		g = mayAnalysis.getControlFlow(activeBody,activeBody.getMethod().getName());
+    		mayAnalysis.MayAnalysis(g);
+    	}
+
+
+}
+}
