@@ -1,0 +1,32 @@
+
+// TopLatticeElement represents the universal set 
+public class TopLatticeElement implements LatticeElement{
+
+  @Override
+	public LatticeElement Join(LatticeElement element) {
+		return new TopLatticeElement();
+	}
+
+	@Override
+	
+	public LatticeElement Meet(LatticeElement element) {
+		return element;
+	}
+	@Override
+	public String toString()
+	{
+		return "T";
+	}
+
+	@Override
+	public boolean equals(LatticeElement element) {
+		if(element instanceof TopLatticeElement)
+			return true;
+		else 
+			return false;
+	}
+	
+	
+	
+	
+}
