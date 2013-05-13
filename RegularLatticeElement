@@ -1,0 +1,119 @@
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.Set;
+
+
+public class RegularLatticeElement implements LatticeElement{
+  Set<Integer> integers;
+	public RegularLatticeElement(Set<Integer> integers)
+	{
+		this.integers = integers;
+	}
+	// Join --- the union 
+	// The join of a TopLatticeElement and RegularLatticeElement would get the TopLatticeElement
+	// The join of a BottomLatticeElement and RegularLatticeElmenet would get the RegularLatticeElement
+	// The join of two RegularLatticeElement would get all the integers of the two sets.
+	@Override
+	public LatticeElement Join(LatticeElement element) {
+		LatticeElement m = null ;
+		if(element instanceof TopLatticeElement)
+		{
+			m = (TopLatticeElement)element;
+		}
+		else if (element instanceof BottomLatticeElement)
+		{
+			m = new RegularLatticeElement(integers);
+		}
+		else if(element instanceof RegularLatticeElement)
+		{
+			integers.addAll(((RegularLatticeElement)element).getElementValue());
+			m = new RegularLatticeElement(integers);
+		}
+		return m;
+	}
+
+	@Override
+	// Intersection 
+	// The intersection of a TopLatticeElement and RegularLatticeElement would get the RegularLatticeElement
+	// The intersection of a BottomLatticeElement and RegularLatticeElmenet would get the BottomLatticeElement
+	// The join of two RegularLatticeElement would get the common integers of the two sets.
+	public LatticeElement Meet(LatticeElement element) {
+		LatticeElement m = null;
+		if(element instanceof TopLatticeElement)
+		{
+			m = new RegularLatticeElement(integers);
+		}
+		else if (element instanceof BottomLatticeElement)
+		{
+			m = (BottomLatticeElement) element;
+		}
+		else if (element instanceof RegularLatticeElement)
+		{
+			Set<Integer> interSection = new HashSet<Integer>(integers);
+			Boolean isEmpty = interSection.retainAll(((RegularLatticeElement)element).getElementValue());
+			if(isEmpty == true)
+			{
+				m = new BottomLatticeElement();
+			}
+			else 
+			{
+
+				m = new RegularLatticeElement(interSection);
+			}
+			
+		}
+		
+		return m;
+	}
+	
+	public Set<Integer> getElementValue()
+	{
+		return integers;
+	}
+	@Override
+	public String toString()
+	{
+		return integers.toString();
+		
+	}
+	public boolean equals(LatticeElement element) {
+		boolean isEqual = true;
+		if(element instanceof RegularLatticeElement)
+		{
+			RegularLatticeElement Relement = (RegularLatticeElement) element;
+			Set<Integer> thatSet = Relement.getElementValue();
+			if(integers.size() != thatSet.size())
+			{
+				isEqual = false;
+			}
+			else
+			{
+				Iterator<Integer> thisIt = integers.iterator();
+				Iterator<Integer> thatIt = thatSet.iterator();
+				while(thisIt.hasNext() && thatIt.hasNext())
+				{
+					Integer thisNext = thisIt.next();
+					Integer thatNext = thatIt.next();
+					if(thisNext != thatNext)
+					{
+						isEqual = false;
+					}
+				}
+			}
+			
+		}
+		else if (element instanceof TopLatticeElement) 
+		{
+			isEqual = false;
+		}
+		else if (element instanceof BottomLatticeElement)
+		{
+			isEqual = false;
+		}
+			
+		return isEqual;
+	}
+	
+}
+
+
