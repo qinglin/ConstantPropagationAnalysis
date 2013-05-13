@@ -1,0 +1,6 @@
+public interface LatticeElement {
+  public LatticeElement Join(LatticeElement element);// Union
+	public LatticeElement Meet(LatticeElement element);// Intersection
+	public String toString(); // PrintOut
+	public boolean equals(LatticeElement element) ;// Decide if the two LatticeElement are equal
+}
