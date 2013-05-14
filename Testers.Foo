@@ -1,0 +1,27 @@
+package Testers;
+
+public class Foo {
+  public static void main(String args[])
+	{
+		int a = 0;
+		int b = a;
+		b = 3;
+
+		if(a > 1)
+		{
+			a = 3;
+		}
+		else
+		{
+			a = 4;
+		}
+		
+		int c = a + 2;
+		
+		while (a < 17)
+		{
+			b = b + 1;
+		}
+	}
+	
+}
